@@ -26,6 +26,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
 
       - name: Install LLVM and Clang
         uses: KyleMayes/install-llvm-action@v1
@@ -162,6 +164,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
