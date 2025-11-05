@@ -1,0 +1,258 @@
+name: Auto Release after Upstream Sync
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+jobs:
+  check-and-release:
+    if: |
+      github.event.pull_request.merged == true &&
+      contains(github.event.pull_request.title, 'Sync with RustDesk')
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      new_version: ${{ steps.check.outputs.new_version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from PR
+        id: check
+        run: |
+          # Estrai la versione dal titolo della PR
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          VERSION=$(echo "$PR_TITLE" | grep -oP '\d+\.\d+\.\d+' || echo "")
+          
+          if [ -n "$VERSION" ]; then
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "new_version=$VERSION" >> $GITHUB_OUTPUT
+            echo "New version to release: $VERSION"
+          else
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            echo "Could not extract version from PR title"
+          fi
+
+      - name: Create and push tag
+        if: steps.check.outputs.should_release == 'true'
+        run: |
+          VERSION="${{ steps.check.outputs.new_version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Crea tag
+          git tag -a "v$VERSION" -m "Pintas Assistenza v$VERSION (based on RustDesk $VERSION)"
+          git push origin "v$VERSION"
+
+  build-windows:
+    needs: check-and-release
+    if: needs.check-and-release.outputs.should_release == 'true'
+    runs-on: windows-2022
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.check-and-release.outputs.new_version }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.75"
+
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: "15.0"
+
+      - name: Install dependencies
+        run: |
+          choco install -y nasm
+          git clone https://github.com/microsoft/vcpkg
+          cd vcpkg
+          .\bootstrap-vcpkg.bat
+          .\vcpkg integrate install
+          .\vcpkg install libvpx:x64-windows-static libyuv:x64-windows-static opus:x64-windows-static aom:x64-windows-static
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Build Windows
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+        run: |
+          flutter config --enable-windows-desktop
+          python3 ./build.py --flutter --hwcodec
+          
+      - name: Package Windows
+        run: |
+          cd flutter/build/windows/x64/runner/Release
+          7z a -tzip ${{ github.workspace }}/pintas-assistenza-${{ needs.check-and-release.outputs.new_version }}-windows.zip *
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pintas-assistenza-windows
+          path: pintas-assistenza-${{ needs.check-and-release.outputs.new_version }}-windows.zip
+
+  build-macos:
+    needs: check-and-release
+    if: needs.check-and-release.outputs.should_release == 'true'
+    runs-on: macos-12
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.check-and-release.outputs.new_version }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.75"
+
+      - name: Install dependencies
+        run: |
+          brew install nasm yasm pkg-config create-dmg
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Build macOS
+        run: |
+          flutter config --enable-macos-desktop
+          python3 ./build.py --flutter --hwcodec
+
+      - name: Create DMG
+        run: |
+          cd flutter/build/macos/Build/Products/Release
+          
+          # Rinomina l'app
+          mv "RustDesk.app" "Pintas Assistenza.app" || true
+          
+          create-dmg \
+            --volname "Pintas Assistenza" \
+            --volicon "Pintas Assistenza.app/Contents/Resources/icon.icns" \
+            --window-pos 200 120 \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --icon "Pintas Assistenza.app" 200 190 \
+            --hide-extension "Pintas Assistenza.app" \
+            --app-drop-link 600 185 \
+            "${{ github.workspace }}/pintas-assistenza-${{ needs.check-and-release.outputs.new_version }}-macos.dmg" \
+            "Pintas Assistenza.app"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pintas-assistenza-macos
+          path: pintas-assistenza-${{ needs.check-and-release.outputs.new_version }}-macos.dmg
+
+  create-release:
+    needs: [check-and-release, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          VERSION="${{ needs.check-and-release.outputs.new_version }}"
+          cat > RELEASE_NOTES.md << EOF
+          # Pintas Assistenza v$VERSION
+          
+          Questa versione è basata su RustDesk v$VERSION e include tutte le ultime funzionalità e correzioni.
+          
+          ## 📥 Download
+          
+          - **Windows**: \`pintas-assistenza-$VERSION-windows.zip\`
+          - **macOS**: \`pintas-assistenza-$VERSION-macos.dmg\`
+          
+          ## ✨ Novità da RustDesk
+          
+          Per le note di rilascio complete di RustDesk, visita: https://github.com/rustdesk/rustdesk/releases/tag/$VERSION
+          
+          ## 🔄 Aggiornamento Automatico
+          
+          L'applicazione rileverà automaticamente questo aggiornamento e ti chiederà di installarlo.
+          
+          ## 🎨 Personalizzazioni Pintas
+          
+          - Branding personalizzato "Pintas Assistenza"
+          - Icone e grafica personalizzate
+          - Configurazione server personalizzata
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.check-and-release.outputs.new_version }}
+          name: Pintas Assistenza v${{ needs.check-and-release.outputs.new_version }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            pintas-assistenza-windows/pintas-assistenza-${{ needs.check-and-release.outputs.new_version }}-windows.zip
+            pintas-assistenza-macos/pintas-assistenza-${{ needs.check-and-release.outputs.new_version }}-macos.dmg
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update manifest for auto-updates
+        run: |
+          VERSION="${{ needs.check-and-release.outputs.new_version }}"
+          REPO="${{ github.repository }}"
+          
+          cat > update-manifest.json << EOF
+          {
+            "version": "$VERSION",
+            "windows": {
+              "url": "https://github.com/$REPO/releases/download/v$VERSION/pintas-assistenza-$VERSION-windows.zip",
+              "checksum": ""
+            },
+            "macos": {
+              "url": "https://github.com/$REPO/releases/download/v$VERSION/pintas-assistenza-$VERSION-macos.dmg",
+              "checksum": ""
+            },
+            "release_notes": "Aggiornamento a RustDesk v$VERSION con tutte le ultime funzionalità",
+            "release_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "rustdesk_version": "$VERSION"
+          }
+          EOF
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add update-manifest.json
+          git commit -m "📦 Update manifest to version $VERSION"
+          git push
+
+      - name: Create success notification
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const version = '${{ needs.check-and-release.outputs.new_version }}';
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `✅ Release v${version} Published Successfully`,
+              body: `Il release Pintas Assistenza v${version} è stato creato e pubblicato con successo!
+              
+              🔗 **Link Release**: https://github.com/${context.repo.owner}/${context.repo.repo}/releases/tag/v${version}
+              
+              ## Artefatti pubblicati
+              - ✅ Windows build
+              - ✅ macOS build
+              - ✅ Manifest aggiornamenti aggiornato
+              
+              Gli utenti riceveranno automaticamente la notifica di aggiornamento.`,
+              labels: ['release', 'automated']
+            })
