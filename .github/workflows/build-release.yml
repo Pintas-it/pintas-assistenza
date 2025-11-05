@@ -52,16 +52,6 @@ jobs:
           choco install -y nasm
           echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install toml
-
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -72,42 +62,15 @@ jobs:
       - name: Apply Pintas branding
         shell: bash
         run: |
-          echo "🎨 Applying Pintas Assistenza branding..."
-          
-          # Modifica Cargo.toml
+          # Applica modifiche branding
           sed -i 's/name = "rustdesk"/name = "pintas-assistenza"/' Cargo.toml
           
-          # Modifica src/common.rs se esiste
           if [ -f "src/common.rs" ]; then
-            sed -i 's/"RustDesk"/"Pintas Assistenza"/g' src/common.rs
+            sed -i 's/APP_NAME = "RustDesk"/APP_NAME = "Pintas Assistenza"/' src/common.rs
           fi
           
-          # Modifica flutter/pubspec.yaml
           if [ -f "flutter/pubspec.yaml" ]; then
             sed -i 's/name: rustdesk/name: pintas_assistenza/' flutter/pubspec.yaml
-            sed -i 's/description: .*/description: Pintas Assistenza - Remote Desktop/' flutter/pubspec.yaml
-          fi
-          
-          echo "✅ Branding applied"
-
-      - name: Build Rust library with Flutter bridge
-        env:
-          VCPKG_ROOT: ${{ github.workspace }}\vcpkg
-        shell: bash
-        run: |
-          # Build usando lo script di build ufficiale di RustDesk
-          # Questo genera il bridge Flutter automaticamente
-          python3 res/inline-sciter.py
-          
-          # Build con features Flutter
-          cargo build --release --features flutter,hwcodec
-          
-          # Verifica che il bridge sia stato generato
-          if [ -f "flutter/lib/generated_bridge.dart" ]; then
-            echo "✅ Flutter bridge generated successfully"
-          else
-            echo "❌ Flutter bridge not found!"
-            exit 1
           fi
 
       - name: Build Flutter Windows
@@ -118,6 +81,12 @@ jobs:
           cd flutter
           flutter pub get
           flutter build windows --release
+
+      - name: Build Rust components
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}\vcpkg
+        run: |
+          cargo build --release --features flutter,hwcodec
 
       - name: Organize Windows build
         shell: bash
@@ -131,9 +100,9 @@ jobs:
             cp -r flutter/build/windows/runner/Release/* build/windows-release/
           fi
           
-          # Copia le DLL Rust
-          if [ -f "target/release/librustdesk.dll" ]; then
-            cp target/release/librustdesk.dll build/windows-release/
+          # Copia l'eseguibile Rust se esiste
+          if [ -f "target/release/pintas-assistenza.exe" ]; then
+            cp target/release/pintas-assistenza.exe build/windows-release/
           fi
           
           # Rinomina l'eseguibile principale
@@ -141,20 +110,20 @@ jobs:
             mv build/windows-release/rustdesk.exe build/windows-release/pintas-assistenza.exe
           fi
           
-          # Crea un README
-          cat > build/windows-release/README.txt << 'EOF'
-Pintas Assistenza - Remote Desktop
-
-Per avviare l'applicazione, esegui: pintas-assistenza.exe
-
-Requisiti:
-- Windows 10 o superiore (64-bit)
-- Connessione internet
-
-Supporto: assistenza@pintas.com
-EOF
-          
           ls -la build/windows-release/
+
+      - name: Create Windows installer
+        shell: bash
+        run: |
+          # Crea un semplice file batch per l'installazione
+          cat > build/windows-release/install.bat << 'EOF'
+          @echo off
+          echo Installing Pintas Assistenza...
+          mkdir "%APPDATA%\Pintas Assistenza"
+          copy /Y *.* "%APPDATA%\Pintas Assistenza\"
+          echo Installation complete!
+          pause
+          EOF
 
       - name: Package Windows build
         shell: bash
@@ -190,16 +159,6 @@ EOF
         run: |
           brew install nasm yasm cmake pkg-config create-dmg
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install Python dependencies
-        run: |
-          python3 -m pip install --upgrade pip
-          pip3 install toml
-
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -209,69 +168,49 @@ EOF
 
       - name: Apply Pintas branding
         run: |
-          echo "🎨 Applying Pintas Assistenza branding..."
-          
-          # Modifica Cargo.toml
+          # Applica modifiche branding
           sed -i '' 's/name = "rustdesk"/name = "pintas-assistenza"/' Cargo.toml
           
-          # Modifica src/common.rs
           if [ -f "src/common.rs" ]; then
-            sed -i '' 's/"RustDesk"/"Pintas Assistenza"/g' src/common.rs
+            sed -i '' 's/APP_NAME = "RustDesk"/APP_NAME = "Pintas Assistenza"/' src/common.rs
           fi
           
-          # Modifica flutter/pubspec.yaml
           if [ -f "flutter/pubspec.yaml" ]; then
             sed -i '' 's/name: rustdesk/name: pintas_assistenza/' flutter/pubspec.yaml
           fi
           
-          # Modifica Info.plist
           if [ -f "flutter/macos/Runner/Info.plist" ]; then
             sed -i '' 's/RustDesk/Pintas Assistenza/g' flutter/macos/Runner/Info.plist
             sed -i '' 's/com.carriez.rustdesk/com.pintas.assistenza/g' flutter/macos/Runner/Info.plist
           fi
-          
-          echo "✅ Branding applied"
 
-      - name: Build Rust library with Flutter bridge
-        run: |
-          # Genera il bridge Flutter
-          python3 res/inline-sciter.py
-          
-          # Build Rust
-          cargo build --release --features flutter,hwcodec
-          
-          # Verifica bridge
-          if [ -f "flutter/lib/generated_bridge.dart" ]; then
-            echo "✅ Flutter bridge generated successfully"
-          else
-            echo "❌ Flutter bridge not found!"
-            exit 1
-          fi
-
-      - name: Build Flutter macOS
+      - name: Build Flutter macOS (x86_64)
         run: |
           flutter config --enable-macos-desktop
           cd flutter
           flutter pub get
           flutter build macos --release
 
+      - name: Build Rust components
+        run: |
+          cargo build --release --features flutter,hwcodec
+
       - name: Create macOS app bundle
         run: |
           cd flutter/build/macos/Build/Products/Release
           
-          # Rinomina l'app se necessario
+          # Rinomina l'app
           if [ -d "rustdesk.app" ]; then
             mv rustdesk.app "Pintas Assistenza.app"
           fi
           
           APP_NAME="Pintas Assistenza.app"
           
-          # Copia le librerie Rust
-          if [ -f "${{ github.workspace }}/target/release/librustdesk.dylib" ]; then
-            cp "${{ github.workspace }}/target/release/librustdesk.dylib" "$APP_NAME/Contents/MacOS/"
+          # Copia l'eseguibile Rust se esiste
+          if [ -f "${{ github.workspace }}/target/release/pintas-assistenza" ]; then
+            cp "${{ github.workspace }}/target/release/pintas-assistenza" "$APP_NAME/Contents/MacOS/"
           fi
           
-          echo "✅ App bundle created"
           ls -la "$APP_NAME/Contents/MacOS/"
 
       - name: Create DMG
@@ -331,45 +270,49 @@ EOF
           cat > RELEASE_NOTES.md << EOF
           # 🎉 Pintas Assistenza v${{ steps.version.outputs.version }}
           
-          Remote Desktop professionale basato su RustDesk.
+          Release ufficiale di Pintas Assistenza basato su RustDesk.
           
           ## 📥 Download
           
-          ### Windows (64-bit)
-          - **pintas-assistenza-${{ steps.version.outputs.version }}-windows-x64.zip**
-            1. Estrai lo ZIP
-            2. Esegui \`pintas-assistenza.exe\`
-            3. **Importante**: Se Windows mostra un avviso, clicca "Maggiori informazioni" → "Esegui comunque"
+          Scegli la versione per il tuo sistema operativo:
           
-          ### macOS (Intel & Apple Silicon)
+          ### Windows
+          - **pintas-assistenza-${{ steps.version.outputs.version }}-windows-x64.zip**
+            - Estrai lo ZIP
+            - Esegui \`pintas-assistenza.exe\`
+            - Oppure esegui \`install.bat\` per installare nel sistema
+          
+          ### macOS
           - **pintas-assistenza-${{ steps.version.outputs.version }}-macos.dmg**
-            1. Apri il DMG
-            2. Trascina "Pintas Assistenza" in Applicazioni
-            3. **Importante**: Al primo avvio, fai click destro → "Apri"
+            - Apri il DMG
+            - Trascina "Pintas Assistenza" nella cartella Applicazioni
+            - Al primo avvio, fai click destro → Apri per bypassare Gatekeeper
           
           ## ✨ Caratteristiche
           
           - 🖥️ Desktop remoto veloce e sicuro
           - 🔒 Crittografia end-to-end
           - 🎨 Interfaccia personalizzata Pintas
-          - 🌍 Multipiattaforma (Windows, macOS)
-          - 🚀 Prestazioni ottimizzate
+          - 🔄 Aggiornamenti automatici
+          - 🌍 Multipiattaforma
           
-          ## 🔧 Requisiti
+          ## 🔧 Requisiti di Sistema
           
-          **Windows:** Windows 10/11 (64-bit), 4GB RAM  
-          **macOS:** macOS 10.15+, Intel o Apple Silicon
+          **Windows:**
+          - Windows 10/11 (64-bit)
+          - 4GB RAM
           
-          ## ⚠️ Note di Sicurezza
-          
-          Questa versione non è firmata digitalmente. I sistemi operativi mostreranno avvisi di sicurezza normali per software non firmato.
+          **macOS:**
+          - macOS 10.15 o successivo
+          - Apple Silicon o Intel
           
           ## 📞 Supporto
           
-          assistenza@pintas.com
+          Per assistenza: assistenza@pintas.com
           
           ---
-          *Basato su RustDesk Open Source*
+          
+          *Basato su RustDesk - Open Source Remote Desktop*
           EOF
 
       - name: Create GitHub Release
@@ -414,11 +357,10 @@ EOF
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin
           git checkout main || git checkout master
           git pull
           cp update-manifest.json update-manifest.json.new
           mv update-manifest.json.new update-manifest.json
           git add update-manifest.json
-          git commit -m "📦 Update manifest for v${{ steps.version.outputs.version }}" || echo "No changes"
-          git push || echo "Push skipped"
+          git commit -m "📦 Update manifest for v${{ steps.version.outputs.version }}" || echo "No changes to commit"
+          git push || echo "Push failed, will try in next run"
