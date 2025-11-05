@@ -1,0 +1,366 @@
+name: Build Pintas Assistenza Executables
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.0.0)'
+        required: true
+        default: '1.0.0'
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: "1.75"
+  LLVM_VERSION: "15.0"
+  FLUTTER_VERSION: "3.19.0"
+  TAG_NAME: ${{ github.ref_name }}
+  VERSION: ${{ github.event.inputs.version }}
+
+jobs:
+  build-windows:
+    name: Build Windows
+    runs-on: windows-2022
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: ${{ env.LLVM_VERSION }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install dependencies with vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg
+          cd vcpkg
+          .\bootstrap-vcpkg.bat
+          .\vcpkg integrate install
+          .\vcpkg install libvpx:x64-windows-static libyuv:x64-windows-static opus:x64-windows-static aom:x64-windows-static
+        shell: cmd
+
+      - name: Install NASM
+        run: |
+          choco install -y nasm
+          echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+          cache: true
+
+      - name: Apply Pintas branding
+        shell: bash
+        run: |
+          # Applica modifiche branding
+          sed -i 's/name = "rustdesk"/name = "pintas-assistenza"/' Cargo.toml
+          
+          if [ -f "src/common.rs" ]; then
+            sed -i 's/APP_NAME = "RustDesk"/APP_NAME = "Pintas Assistenza"/' src/common.rs
+          fi
+          
+          if [ -f "flutter/pubspec.yaml" ]; then
+            sed -i 's/name: rustdesk/name: pintas_assistenza/' flutter/pubspec.yaml
+          fi
+
+      - name: Build Flutter Windows
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}\vcpkg
+        run: |
+          flutter config --enable-windows-desktop
+          cd flutter
+          flutter pub get
+          flutter build windows --release
+
+      - name: Build Rust components
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}\vcpkg
+        run: |
+          cargo build --release --features flutter,hwcodec
+
+      - name: Organize Windows build
+        shell: bash
+        run: |
+          mkdir -p build/windows-release
+          
+          # Copia i file dalla build Flutter
+          if [ -d "flutter/build/windows/x64/runner/Release" ]; then
+            cp -r flutter/build/windows/x64/runner/Release/* build/windows-release/
+          elif [ -d "flutter/build/windows/runner/Release" ]; then
+            cp -r flutter/build/windows/runner/Release/* build/windows-release/
+          fi
+          
+          # Copia l'eseguibile Rust se esiste
+          if [ -f "target/release/pintas-assistenza.exe" ]; then
+            cp target/release/pintas-assistenza.exe build/windows-release/
+          fi
+          
+          # Rinomina l'eseguibile principale
+          if [ -f "build/windows-release/rustdesk.exe" ]; then
+            mv build/windows-release/rustdesk.exe build/windows-release/pintas-assistenza.exe
+          fi
+          
+          ls -la build/windows-release/
+
+      - name: Create Windows installer
+        shell: bash
+        run: |
+          # Crea un semplice file batch per l'installazione
+          cat > build/windows-release/install.bat << 'EOF'
+          @echo off
+          echo Installing Pintas Assistenza...
+          mkdir "%APPDATA%\Pintas Assistenza"
+          copy /Y *.* "%APPDATA%\Pintas Assistenza\"
+          echo Installation complete!
+          pause
+          EOF
+
+      - name: Package Windows build
+        shell: bash
+        run: |
+          cd build/windows-release
+          VERSION="${{ env.VERSION }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="1.0.0"
+          fi
+          7z a -tzip ../../pintas-assistenza-${VERSION}-windows-x64.zip *
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pintas-assistenza-windows
+          path: pintas-assistenza-*-windows-x64.zip
+          retention-days: 30
+
+  build-macos:
+    name: Build macOS
+    runs-on: macos-12
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Install dependencies
+        run: |
+          brew install nasm yasm cmake pkg-config create-dmg
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+          cache: true
+
+      - name: Apply Pintas branding
+        run: |
+          # Applica modifiche branding
+          sed -i '' 's/name = "rustdesk"/name = "pintas-assistenza"/' Cargo.toml
+          
+          if [ -f "src/common.rs" ]; then
+            sed -i '' 's/APP_NAME = "RustDesk"/APP_NAME = "Pintas Assistenza"/' src/common.rs
+          fi
+          
+          if [ -f "flutter/pubspec.yaml" ]; then
+            sed -i '' 's/name: rustdesk/name: pintas_assistenza/' flutter/pubspec.yaml
+          fi
+          
+          if [ -f "flutter/macos/Runner/Info.plist" ]; then
+            sed -i '' 's/RustDesk/Pintas Assistenza/g' flutter/macos/Runner/Info.plist
+            sed -i '' 's/com.carriez.rustdesk/com.pintas.assistenza/g' flutter/macos/Runner/Info.plist
+          fi
+
+      - name: Build Flutter macOS (x86_64)
+        run: |
+          flutter config --enable-macos-desktop
+          cd flutter
+          flutter pub get
+          flutter build macos --release
+
+      - name: Build Rust components
+        run: |
+          cargo build --release --features flutter,hwcodec
+
+      - name: Create macOS app bundle
+        run: |
+          cd flutter/build/macos/Build/Products/Release
+          
+          # Rinomina l'app
+          if [ -d "rustdesk.app" ]; then
+            mv rustdesk.app "Pintas Assistenza.app"
+          fi
+          
+          APP_NAME="Pintas Assistenza.app"
+          
+          # Copia l'eseguibile Rust se esiste
+          if [ -f "${{ github.workspace }}/target/release/pintas-assistenza" ]; then
+            cp "${{ github.workspace }}/target/release/pintas-assistenza" "$APP_NAME/Contents/MacOS/"
+          fi
+          
+          ls -la "$APP_NAME/Contents/MacOS/"
+
+      - name: Create DMG
+        run: |
+          cd flutter/build/macos/Build/Products/Release
+          VERSION="${{ env.VERSION }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="1.0.0"
+          fi
+          
+          create-dmg \
+            --volname "Pintas Assistenza" \
+            --window-pos 200 120 \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --icon "Pintas Assistenza.app" 200 190 \
+            --hide-extension "Pintas Assistenza.app" \
+            --app-drop-link 600 185 \
+            "${{ github.workspace }}/pintas-assistenza-${VERSION}-macos.dmg" \
+            "Pintas Assistenza.app" || echo "DMG creation had warnings, continuing..."
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pintas-assistenza-macos
+          path: pintas-assistenza-*-macos.dmg
+          retention-days: 30
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Display structure
+        run: ls -R
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Create Release Notes
+        run: |
+          cat > RELEASE_NOTES.md << EOF
+          # 🎉 Pintas Assistenza v${{ steps.version.outputs.version }}
+          
+          Release ufficiale di Pintas Assistenza basato su RustDesk.
+          
+          ## 📥 Download
+          
+          Scegli la versione per il tuo sistema operativo:
+          
+          ### Windows
+          - **pintas-assistenza-${{ steps.version.outputs.version }}-windows-x64.zip**
+            - Estrai lo ZIP
+            - Esegui \`pintas-assistenza.exe\`
+            - Oppure esegui \`install.bat\` per installare nel sistema
+          
+          ### macOS
+          - **pintas-assistenza-${{ steps.version.outputs.version }}-macos.dmg**
+            - Apri il DMG
+            - Trascina "Pintas Assistenza" nella cartella Applicazioni
+            - Al primo avvio, fai click destro → Apri per bypassare Gatekeeper
+          
+          ## ✨ Caratteristiche
+          
+          - 🖥️ Desktop remoto veloce e sicuro
+          - 🔒 Crittografia end-to-end
+          - 🎨 Interfaccia personalizzata Pintas
+          - 🔄 Aggiornamenti automatici
+          - 🌍 Multipiattaforma
+          
+          ## 🔧 Requisiti di Sistema
+          
+          **Windows:**
+          - Windows 10/11 (64-bit)
+          - 4GB RAM
+          
+          **macOS:**
+          - macOS 10.15 o successivo
+          - Apple Silicon o Intel
+          
+          ## 📞 Supporto
+          
+          Per assistenza: assistenza@pintas.com
+          
+          ---
+          
+          *Basato su RustDesk - Open Source Remote Desktop*
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Pintas Assistenza v${{ steps.version.outputs.version }}
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: false
+          files: |
+            pintas-assistenza-windows/*.zip
+            pintas-assistenza-macos/*.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create update manifest
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          REPO="${{ github.repository }}"
+          
+          cat > update-manifest.json << EOF
+          {
+            "version": "$VERSION",
+            "windows": {
+              "url": "https://github.com/$REPO/releases/download/v$VERSION/pintas-assistenza-$VERSION-windows-x64.zip",
+              "checksum": ""
+            },
+            "macos": {
+              "url": "https://github.com/$REPO/releases/download/v$VERSION/pintas-assistenza-$VERSION-macos.dmg",
+              "checksum": ""
+            },
+            "release_notes": "Versione $VERSION di Pintas Assistenza",
+            "release_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "download_page": "https://github.com/$REPO/releases/tag/v$VERSION"
+          }
+          EOF
+          
+          cat update-manifest.json
+
+      - name: Commit update manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout main || git checkout master
+          git pull
+          cp update-manifest.json update-manifest.json.new
+          mv update-manifest.json.new update-manifest.json
+          git add update-manifest.json
+          git commit -m "📦 Update manifest for v${{ steps.version.outputs.version }}" || echo "No changes to commit"
+          git push || echo "Push failed, will try in next run"
