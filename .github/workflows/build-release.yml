@@ -58,7 +58,7 @@ jobs:
       - name: Install vcpkg dependencies
         run: |
           cd vcpkg
-          .\vcpkg install --triplet x64-windows-static libvpx libyuv opus aom
+          .\vcpkg install --triplet x64-windows-static
 
       - name: Install NASM
         run: |
