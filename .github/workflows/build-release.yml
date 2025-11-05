@@ -74,6 +74,7 @@ jobs:
         run: |
           echo "Applying Pintas Assistenza branding..."
           sed -i 's/name = "rustdesk"/name = "pintas-assistenza"/' Cargo.toml
+          sed -i 's/default-run = "rustdesk"/default-run = "pintas-assistenza"/' Cargo.toml
           if [ -f "src/common.rs" ]; then
             sed -i 's/"RustDesk"/"Pintas Assistenza"/g' src/common.rs
           fi
@@ -193,6 +194,7 @@ jobs:
         run: |
           echo "Applying Pintas Assistenza branding..."
           sed -i '' 's/name = "rustdesk"/name = "pintas-assistenza"/' Cargo.toml
+          sed -i '' 's/default-run = "rustdesk"/default-run = "pintas-assistenza"/' Cargo.toml
           if [ -f "src/common.rs" ]; then
             sed -i '' 's/"RustDesk"/"Pintas Assistenza"/g' src/common.rs
           fi
