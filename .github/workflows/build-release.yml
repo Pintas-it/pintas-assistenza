@@ -15,7 +15,7 @@ env:
   CARGO_TERM_COLOR: always
   RUST_VERSION: "1.75"
   LLVM_VERSION: "15.0"
-  FLUTTER_VERSION: "3.19.0"
+  FLUTTER_VERSION: "3.24.5"
   TAG_NAME: ${{ github.ref_name }}
   VERSION: ${{ github.event.inputs.version }}
 
