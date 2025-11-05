@@ -1,0 +1,151 @@
+name: Sync with RustDesk Upstream
+
+on:
+  schedule:
+    # Controlla ogni giorno alle 02:00 UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch: # Permette esecuzione manuale
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/rustdesk/rustdesk.git || true
+          git fetch upstream
+
+      - name: Check for new upstream tags
+        id: check_tags
+        run: |
+          # Ottieni l'ultimo tag upstream
+          LATEST_UPSTREAM_TAG=$(git describe --tags --abbrev=0 upstream/master 2>/dev/null || echo "none")
+          echo "Latest upstream tag: $LATEST_UPSTREAM_TAG"
+          
+          # Ottieni l'ultimo nostro tag
+          LATEST_LOCAL_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "none")
+          echo "Latest local tag: $LATEST_LOCAL_TAG"
+          
+          echo "upstream_tag=$LATEST_UPSTREAM_TAG" >> $GITHUB_OUTPUT
+          echo "local_tag=$LATEST_LOCAL_TAG" >> $GITHUB_OUTPUT
+          
+          # Verifica se c'è un nuovo tag
+          if [ "$LATEST_UPSTREAM_TAG" != "$LATEST_LOCAL_TAG" ] && [ "$LATEST_UPSTREAM_TAG" != "none" ]; then
+            echo "new_version=true" >> $GITHUB_OUTPUT
+            echo "New version detected: $LATEST_UPSTREAM_TAG"
+          else
+            echo "new_version=false" >> $GITHUB_OUTPUT
+            echo "No new version"
+          fi
+
+      - name: Create new branch for sync
+        if: steps.check_tags.outputs.new_version == 'true'
+        run: |
+          UPSTREAM_TAG=${{ steps.check_tags.outputs.upstream_tag }}
+          BRANCH_NAME="sync-upstream-${UPSTREAM_TAG}"
+          git checkout -b $BRANCH_NAME
+
+      - name: Merge upstream changes
+        if: steps.check_tags.outputs.new_version == 'true'
+        run: |
+          UPSTREAM_TAG=${{ steps.check_tags.outputs.upstream_tag }}
+          
+          # Prova a fare merge
+          if git merge upstream/master -m "Merge upstream RustDesk ${UPSTREAM_TAG}"; then
+            echo "Merge successful"
+          else
+            echo "Merge conflicts detected"
+            # Salva i file in conflitto
+            git diff --name-only --diff-filter=U > conflicts.txt
+            cat conflicts.txt
+            
+            # Per ora accetta le modifiche upstream, poi ripristineremo le nostre personalizzazioni
+            git checkout --theirs .
+            git add .
+            git commit -m "Resolved conflicts - accepting upstream changes"
+          fi
+
+      - name: Restore branding customizations
+        if: steps.check_tags.outputs.new_version == 'true'
+        run: |
+          # Ripristina le personalizzazioni Pintas Assistenza
+          
+          # 1. Nome applicazione in Cargo.toml
+          sed -i 's/name = "rustdesk"/name = "pintas-assistenza"/' Cargo.toml
+          
+          # 2. APP_NAME in common.rs (se esiste)
+          if [ -f "src/common.rs" ]; then
+            sed -i 's/APP_NAME = "RustDesk"/APP_NAME = "Pintas Assistenza"/' src/common.rs
+          fi
+          
+          # 3. Assicurati che le nostre icone siano preservate
+          # (Le icone dovrebbero essere già nel repo, questo è un backup)
+          
+          git add -A
+          git commit -m "Restore Pintas Assistenza branding" || echo "No branding changes needed"
+
+      - name: Push changes and create PR
+        if: steps.check_tags.outputs.new_version == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          UPSTREAM_TAG=${{ steps.check_tags.outputs.upstream_tag }}
+          BRANCH_NAME="sync-upstream-${UPSTREAM_TAG}"
+          
+          git push -u origin $BRANCH_NAME
+          
+          # Crea Pull Request usando GitHub CLI
+          gh pr create \
+            --title "🔄 Sync with RustDesk ${UPSTREAM_TAG}" \
+            --body "Sincronizzazione automatica con RustDesk upstream.
+            
+            ## Modifiche
+            - Merged upstream tag: \`${UPSTREAM_TAG}\`
+            - Branding Pintas Assistenza mantenuto
+            - Verificare manualmente eventuali conflitti
+            
+            ## Checklist
+            - [ ] Verificare che le personalizzazioni siano intatte
+            - [ ] Testare la compilazione
+            - [ ] Verificare funzionalità principali
+            - [ ] Mergiare e creare nuovo release" \
+            --base main \
+            --head $BRANCH_NAME
+
+      - name: Create issue if sync failed
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '⚠️ Sync with RustDesk Upstream Failed',
+              body: `La sincronizzazione automatica con RustDesk è fallita.
+              
+              **Azione necessaria**: Verifica manualmente i conflitti e sincronizza.
+              
+              Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              labels: ['sync', 'needs-attention']
+            })
+
+  notify:
+    needs: sync
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Send notification
+        run: |
+          echo "Sync workflow completed. Check the repository for new PRs or issues."
+          # Qui puoi aggiungere notifiche (email, Slack, Discord, etc.)
