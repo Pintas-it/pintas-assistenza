@@ -39,6 +39,7 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: x86_64-pc-windows-msvc
+          components: rustfmt
 
       - name: Install dependencies with vcpkg
         run: |
@@ -46,7 +47,7 @@ jobs:
           cd vcpkg
           .\bootstrap-vcpkg.bat
           .\vcpkg integrate install
-          .\vcpkg install libvpx:x64-windows-static libyuv:x64-windows-static opus:x64-windows-static aom:x64-windows-static
+          .\vcpkg install libvpx:x64-windows-static libyuv:x64-windows-static opus:x64-windows-static aom:x64-windows-static ffmpeg:x64-windows-static
         shell: cmd
 
       - name: Install NASM
@@ -92,7 +93,7 @@ jobs:
         shell: bash
         run: |
           python3 res/inline-sciter.py
-          cargo build --release --features flutter,hwcodec
+          cargo build --release --features flutter
           if [ -f "flutter/lib/generated_bridge.dart" ]; then
             echo "Flutter bridge generated successfully"
           else
@@ -172,6 +173,7 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: x86_64-apple-darwin,aarch64-apple-darwin
+          components: rustfmt
 
       - name: Install dependencies
         run: |
@@ -214,7 +216,7 @@ jobs:
       - name: Build Rust library with Flutter bridge
         run: |
           python3 res/inline-sciter.py
-          cargo build --release --features flutter,hwcodec
+          cargo build --release --features flutter
           if [ -f "flutter/lib/generated_bridge.dart" ]; then
             echo "Flutter bridge generated successfully"
           else
