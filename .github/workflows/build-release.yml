@@ -72,41 +72,28 @@ jobs:
       - name: Apply Pintas branding
         shell: bash
         run: |
-          echo "🎨 Applying Pintas Assistenza branding..."
-          
-          # Modifica Cargo.toml
+          echo "Applying Pintas Assistenza branding..."
           sed -i 's/name = "rustdesk"/name = "pintas-assistenza"/' Cargo.toml
-          
-          # Modifica src/common.rs se esiste
           if [ -f "src/common.rs" ]; then
             sed -i 's/"RustDesk"/"Pintas Assistenza"/g' src/common.rs
           fi
-          
-          # Modifica flutter/pubspec.yaml
           if [ -f "flutter/pubspec.yaml" ]; then
             sed -i 's/name: rustdesk/name: pintas_assistenza/' flutter/pubspec.yaml
             sed -i 's/description: .*/description: Pintas Assistenza - Remote Desktop/' flutter/pubspec.yaml
           fi
-          
-          echo "✅ Branding applied"
+          echo "Branding applied"
 
       - name: Build Rust library with Flutter bridge
         env:
           VCPKG_ROOT: ${{ github.workspace }}\vcpkg
         shell: bash
         run: |
-          # Build usando lo script di build ufficiale di RustDesk
-          # Questo genera il bridge Flutter automaticamente
           python3 res/inline-sciter.py
-          
-          # Build con features Flutter
           cargo build --release --features flutter,hwcodec
-          
-          # Verifica che il bridge sia stato generato
           if [ -f "flutter/lib/generated_bridge.dart" ]; then
-            echo "✅ Flutter bridge generated successfully"
+            echo "Flutter bridge generated successfully"
           else
-            echo "❌ Flutter bridge not found!"
+            echo "Flutter bridge not found!"
             exit 1
           fi
 
@@ -123,38 +110,33 @@ jobs:
         shell: bash
         run: |
           mkdir -p build/windows-release
-          
-          # Copia i file dalla build Flutter
           if [ -d "flutter/build/windows/x64/runner/Release" ]; then
             cp -r flutter/build/windows/x64/runner/Release/* build/windows-release/
           elif [ -d "flutter/build/windows/runner/Release" ]; then
             cp -r flutter/build/windows/runner/Release/* build/windows-release/
           fi
-          
-          # Copia le DLL Rust
           if [ -f "target/release/librustdesk.dll" ]; then
             cp target/release/librustdesk.dll build/windows-release/
           fi
-          
-          # Rinomina l'eseguibile principale
           if [ -f "build/windows-release/rustdesk.exe" ]; then
             mv build/windows-release/rustdesk.exe build/windows-release/pintas-assistenza.exe
           fi
-          
-          # Crea un README
-          cat > build/windows-release/README.txt << 'EOF'
-Pintas Assistenza - Remote Desktop
-
-Per avviare l'applicazione, esegui: pintas-assistenza.exe
-
-Requisiti:
-- Windows 10 o superiore (64-bit)
-- Connessione internet
-
-Supporto: assistenza@pintas.com
-EOF
-          
           ls -la build/windows-release/
+
+      - name: Create README
+        shell: bash
+        run: |
+          cat > build/windows-release/README.txt << 'ENDOFFILE'
+          Pintas Assistenza - Remote Desktop
+          
+          Per avviare: pintas-assistenza.exe
+          
+          Requisiti:
+          - Windows 10 o superiore (64-bit)
+          - Connessione internet
+          
+          Supporto: assistenza@pintas.com
+          ENDOFFILE
 
       - name: Package Windows build
         shell: bash
@@ -209,42 +191,28 @@ EOF
 
       - name: Apply Pintas branding
         run: |
-          echo "🎨 Applying Pintas Assistenza branding..."
-          
-          # Modifica Cargo.toml
+          echo "Applying Pintas Assistenza branding..."
           sed -i '' 's/name = "rustdesk"/name = "pintas-assistenza"/' Cargo.toml
-          
-          # Modifica src/common.rs
           if [ -f "src/common.rs" ]; then
             sed -i '' 's/"RustDesk"/"Pintas Assistenza"/g' src/common.rs
           fi
-          
-          # Modifica flutter/pubspec.yaml
           if [ -f "flutter/pubspec.yaml" ]; then
             sed -i '' 's/name: rustdesk/name: pintas_assistenza/' flutter/pubspec.yaml
           fi
-          
-          # Modifica Info.plist
           if [ -f "flutter/macos/Runner/Info.plist" ]; then
             sed -i '' 's/RustDesk/Pintas Assistenza/g' flutter/macos/Runner/Info.plist
             sed -i '' 's/com.carriez.rustdesk/com.pintas.assistenza/g' flutter/macos/Runner/Info.plist
           fi
-          
-          echo "✅ Branding applied"
+          echo "Branding applied"
 
       - name: Build Rust library with Flutter bridge
         run: |
-          # Genera il bridge Flutter
           python3 res/inline-sciter.py
-          
-          # Build Rust
           cargo build --release --features flutter,hwcodec
-          
-          # Verifica bridge
           if [ -f "flutter/lib/generated_bridge.dart" ]; then
-            echo "✅ Flutter bridge generated successfully"
+            echo "Flutter bridge generated successfully"
           else
-            echo "❌ Flutter bridge not found!"
+            echo "Flutter bridge not found!"
             exit 1
           fi
 
@@ -258,20 +226,14 @@ EOF
       - name: Create macOS app bundle
         run: |
           cd flutter/build/macos/Build/Products/Release
-          
-          # Rinomina l'app se necessario
           if [ -d "rustdesk.app" ]; then
             mv rustdesk.app "Pintas Assistenza.app"
           fi
-          
           APP_NAME="Pintas Assistenza.app"
-          
-          # Copia le librerie Rust
           if [ -f "${{ github.workspace }}/target/release/librustdesk.dylib" ]; then
             cp "${{ github.workspace }}/target/release/librustdesk.dylib" "$APP_NAME/Contents/MacOS/"
           fi
-          
-          echo "✅ App bundle created"
+          echo "App bundle created"
           ls -la "$APP_NAME/Contents/MacOS/"
 
       - name: Create DMG
@@ -281,17 +243,7 @@ EOF
           if [ -z "$VERSION" ]; then
             VERSION="1.0.0"
           fi
-          
-          create-dmg \
-            --volname "Pintas Assistenza" \
-            --window-pos 200 120 \
-            --window-size 800 400 \
-            --icon-size 100 \
-            --icon "Pintas Assistenza.app" 200 190 \
-            --hide-extension "Pintas Assistenza.app" \
-            --app-drop-link 600 185 \
-            "${{ github.workspace }}/pintas-assistenza-${VERSION}-macos.dmg" \
-            "Pintas Assistenza.app" || echo "DMG creation had warnings, continuing..."
+          create-dmg --volname "Pintas Assistenza" --window-pos 200 120 --window-size 800 400 --icon-size 100 --icon "Pintas Assistenza.app" 200 190 --hide-extension "Pintas Assistenza.app" --app-drop-link 600 185 "${{ github.workspace }}/pintas-assistenza-${VERSION}-macos.dmg" "Pintas Assistenza.app" || echo "DMG creation had warnings"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
@@ -328,49 +280,41 @@ EOF
 
       - name: Create Release Notes
         run: |
-          cat > RELEASE_NOTES.md << EOF
-          # 🎉 Pintas Assistenza v${{ steps.version.outputs.version }}
+          cat > RELEASE_NOTES.md << 'ENDOFFILE'
+          # Pintas Assistenza v${{ steps.version.outputs.version }}
           
           Remote Desktop professionale basato su RustDesk.
           
-          ## 📥 Download
+          ## Download
           
           ### Windows (64-bit)
-          - **pintas-assistenza-${{ steps.version.outputs.version }}-windows-x64.zip**
+          - pintas-assistenza-${{ steps.version.outputs.version }}-windows-x64.zip
             1. Estrai lo ZIP
-            2. Esegui \`pintas-assistenza.exe\`
-            3. **Importante**: Se Windows mostra un avviso, clicca "Maggiori informazioni" → "Esegui comunque"
+            2. Esegui pintas-assistenza.exe
+            3. Se Windows mostra un avviso, clicca "Maggiori informazioni" e poi "Esegui comunque"
           
-          ### macOS (Intel & Apple Silicon)
-          - **pintas-assistenza-${{ steps.version.outputs.version }}-macos.dmg**
+          ### macOS (Intel e Apple Silicon)
+          - pintas-assistenza-${{ steps.version.outputs.version }}-macos.dmg
             1. Apri il DMG
             2. Trascina "Pintas Assistenza" in Applicazioni
-            3. **Importante**: Al primo avvio, fai click destro → "Apri"
+            3. Al primo avvio, fai click destro e poi "Apri"
           
-          ## ✨ Caratteristiche
+          ## Caratteristiche
           
-          - 🖥️ Desktop remoto veloce e sicuro
-          - 🔒 Crittografia end-to-end
-          - 🎨 Interfaccia personalizzata Pintas
-          - 🌍 Multipiattaforma (Windows, macOS)
-          - 🚀 Prestazioni ottimizzate
+          - Desktop remoto veloce e sicuro
+          - Crittografia end-to-end
+          - Interfaccia personalizzata Pintas
+          - Multipiattaforma
           
-          ## 🔧 Requisiti
+          ## Requisiti
           
-          **Windows:** Windows 10/11 (64-bit), 4GB RAM  
-          **macOS:** macOS 10.15+, Intel o Apple Silicon
+          Windows: Windows 10/11 (64-bit), 4GB RAM
+          macOS: macOS 10.15+
           
-          ## ⚠️ Note di Sicurezza
-          
-          Questa versione non è firmata digitalmente. I sistemi operativi mostreranno avvisi di sicurezza normali per software non firmato.
-          
-          ## 📞 Supporto
+          ## Supporto
           
           assistenza@pintas.com
-          
-          ---
-          *Basato su RustDesk Open Source*
-          EOF
+          ENDOFFILE
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -390,8 +334,7 @@ EOF
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           REPO="${{ github.repository }}"
-          
-          cat > update-manifest.json << EOF
+          cat > update-manifest.json << ENDOFFILE
           {
             "version": "$VERSION",
             "windows": {
@@ -406,8 +349,7 @@ EOF
             "release_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "download_page": "https://github.com/$REPO/releases/tag/v$VERSION"
           }
-          EOF
-          
+          ENDOFFILE
           cat update-manifest.json
 
       - name: Commit update manifest
@@ -420,5 +362,5 @@ EOF
           cp update-manifest.json update-manifest.json.new
           mv update-manifest.json.new update-manifest.json
           git add update-manifest.json
-          git commit -m "📦 Update manifest for v${{ steps.version.outputs.version }}" || echo "No changes"
+          git commit -m "Update manifest for v${{ steps.version.outputs.version }}" || echo "No changes"
           git push || echo "Push skipped"
