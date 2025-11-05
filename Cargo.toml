@@ -1,5 +1,5 @@
 [package]
-name = "rustdesk"
+name = "pintas-assistenza"
 version = "1.4.3"
 authors = ["rustdesk <info@rustdesk.com>"]
 edition = "2021"
