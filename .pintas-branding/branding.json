@@ -1,0 +1,42 @@
+{
+  "app_name": "Pintas Assistenza",
+  "app_identifier": "com.pintas.assistenza",
+  "company_name": "Pintas",
+  "website": "https://www.pintas.com",
+  "support_email": "assistenza@pintas.com",
+  
+  "replacements": {
+    "RustDesk": "Pintas Assistenza",
+    "rustdesk": "pintas-assistenza",
+    "com.carriez.rustdesk": "com.pintas.assistenza",
+    "hbb.com": "pintas.com"
+  },
+  
+  "files_to_modify": [
+    "Cargo.toml",
+    "src/common.rs",
+    "flutter/pubspec.yaml",
+    "flutter/macos/Runner/Info.plist",
+    "flutter/android/app/src/main/AndroidManifest.xml",
+    "src/lang/it.rs"
+  ],
+  
+  "custom_icons": {
+    "windows": ".pintas-branding/icons/icon.ico",
+    "macos": ".pintas-branding/icons/icon.icns",
+    "generic": ".pintas-branding/icons/icon.png"
+  },
+  
+  "auto_update": {
+    "enabled": true,
+    "manifest_url": "https://raw.githubusercontent.com/Pintas-it/rustdesk/main/update-manifest.json",
+    "check_interval_hours": 24
+  },
+  
+  "custom_server": {
+    "enabled": false,
+    "relay_server": "",
+    "api_server": "",
+    "key": ""
+  }
+}
