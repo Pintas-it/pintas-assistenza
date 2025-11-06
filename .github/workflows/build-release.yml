@@ -58,10 +58,8 @@ jobs:
         run: |
           cd vcpkg
           .\vcpkg integrate install
-          .\vcpkg install --triplet x64-windows-static
-          echo "Verifying opus installation..."
-          dir installed\x64-windows-static\include\opus
-          dir installed\x64-windows-static\lib
+          .\vcpkg install --triplet x64-windows
+          echo "vcpkg installation completed"
         shell: cmd
 
       - name: Install NASM
@@ -104,17 +102,15 @@ jobs:
       - name: Build Rust library
         env:
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-          VCPKGRS_DYNAMIC: 0
-          VCPKGRS_TRIPLET: x64-windows-static
+          VCPKGRS_DYNAMIC: 1
+          VCPKGRS_TRIPLET: x64-windows
         shell: bash
         run: |
           export VCPKG_ROOT="${{ github.workspace }}/vcpkg"
-          export VCPKGRS_DYNAMIC=0
-          export VCPKGRS_TRIPLET=x64-windows-static
+          export VCPKGRS_DYNAMIC=1
+          export VCPKGRS_TRIPLET=x64-windows
           
           echo "VCPKG_ROOT: $VCPKG_ROOT"
-          echo "Checking vcpkg installation..."
-          ls -la "$VCPKG_ROOT/installed/x64-windows-static/include/opus/" || echo "Opus headers not found!"
           
           python3 res/inline-sciter.py
           cargo build --release --features flutter
