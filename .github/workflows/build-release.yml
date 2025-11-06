@@ -92,6 +92,13 @@ jobs:
           echo "Applying Pintas Assistenza branding..."
           sed -i 's/name = "rustdesk"/name = "pintas-assistenza"/' Cargo.toml
           sed -i 's/default-run = "rustdesk"/default-run = "pintas-assistenza"/' Cargo.toml
+          
+          # Rimuovi dipendenze audio problematiche
+          echo "Removing audio dependencies..."
+          sed -i '/magnum-opus/d' Cargo.toml
+          sed -i '/dasp/d' Cargo.toml
+          sed -i '/cpal/d' Cargo.toml
+          
           if [ -f "src/common.rs" ]; then
             sed -i 's/"RustDesk"/"Pintas Assistenza"/g' src/common.rs
           fi
@@ -108,12 +115,15 @@ jobs:
         run: |
           export VCPKG_ROOT="${{ github.workspace }}/vcpkg"
           
-          echo "Building without audio support to avoid opus dependency..."
+          echo "Building without audio support..."
           
           python3 res/inline-sciter.py
           
-          # Build con solo le feature essenziali, senza audio
-          cargo build --release --features "flutter inline" --no-default-features
+          # Build con solo flutter, senza default features
+          cargo build --release --features flutter --no-default-features || {
+            echo "Build failed, trying with minimal features..."
+            cargo build --release --features inline --no-default-features
+          }
           
           if [ -f "flutter/lib/generated_bridge.dart" ]; then
             echo "Flutter bridge generated successfully"
@@ -222,6 +232,13 @@ jobs:
           echo "Applying Pintas Assistenza branding..."
           sed -i '' 's/name = "rustdesk"/name = "pintas-assistenza"/' Cargo.toml
           sed -i '' 's/default-run = "rustdesk"/default-run = "pintas-assistenza"/' Cargo.toml
+          
+          # Rimuovi dipendenze audio problematiche
+          echo "Removing audio dependencies..."
+          sed -i '' '/magnum-opus/d' Cargo.toml
+          sed -i '' '/dasp/d' Cargo.toml
+          sed -i '' '/cpal/d' Cargo.toml
+          
           if [ -f "src/common.rs" ]; then
             sed -i '' 's/"RustDesk"/"Pintas Assistenza"/g' src/common.rs
           fi
@@ -238,8 +255,11 @@ jobs:
         run: |
           python3 res/inline-sciter.py
           
-          # Build con feature minime per evitare dipendenze complesse
-          cargo build --release --features "flutter inline" --no-default-features
+          # Build senza audio
+          cargo build --release --features flutter --no-default-features || {
+            echo "Build failed, trying with minimal features..."
+            cargo build --release --features inline --no-default-features
+          }
           
           if [ -f "flutter/lib/generated_bridge.dart" ]; then
             echo "Flutter bridge generated successfully"
