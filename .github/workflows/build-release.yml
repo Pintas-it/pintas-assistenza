@@ -1,4 +1,27 @@
-name: Build Pintas Assistenza - Simplified
+- name: Extract or Install RustDesk
+        shell: powershell
+        run: |
+          $file = Get-Item "rustdesk-original.*"
+          
+          if ($file.Extension -eq ".zip") {
+            Write-Host "Extracting ZIP..."
+            Expand-Archive -Path $file.FullName -DestinationPath "rustdesk-base" -Force
+          }
+          elseif ($file.Extension -eq ".exe") {
+            Write-Host "Installing EXE silently..."
+            # Prova estrazione con 7zip (incluso in Windows runner)
+            & "C:\Program Files\7-Zip\7z.exe" x $file.FullName -o"rustdesk-base" -y
+            
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "7zip extraction failed, trying alternative..."
+              # Crea directory e copia l'exe direttamente
+              New-Item -ItemType Directory -Force -Path "rustdesk-base"
+              Copy-Item $file.FullName "rustdesk-base/rustdesk.exe"
+            }
+          }
+          
+          Write-Host "Files extracted:"
+          Get-ChildItem -Path "rustdesk-base" -Recurse | Select-Object -First 20name: Build Pintas Assistenza - Simplified
 
 on:
   workflow_dispatch:
@@ -45,18 +68,53 @@ jobs:
       - name: Download Pre-built RustDesk
         shell: powershell
         run: |
+          Write-Host "Fetching latest RustDesk release..."
           $latestRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/rustdesk/rustdesk/releases/latest"
-          $asset = $latestRelease.assets | Where-Object { $_.name -like "*windows_x64.zip" } | Select-Object -First 1
+          
+          Write-Host "Available assets:"
+          $latestRelease.assets | ForEach-Object { Write-Host "  - $($_.name)" }
+          
+          # Cerca il file ZIP per Windows x64
+          $asset = $latestRelease.assets | Where-Object { 
+            $_.name -like "*x86_64.zip" -or 
+            $_.name -like "*win*.zip" -or
+            $_.name -like "*windows*.zip"
+          } | Select-Object -First 1
+          
+          if (-not $asset) {
+            Write-Host "ZIP not found, trying EXE installer..."
+            $asset = $latestRelease.assets | Where-Object { 
+              $_.name -like "*x86_64.exe" -or 
+              $_.name -like "*setup.exe"
+            } | Select-Object -First 1
+          }
+          
+          if (-not $asset) {
+            Write-Error "No suitable Windows asset found!"
+            exit 1
+          }
+          
           $downloadUrl = $asset.browser_download_url
+          $fileName = $asset.name
           
-          Write-Host "Downloading from: $downloadUrl"
-          Invoke-WebRequest -Uri $downloadUrl -OutFile "rustdesk-original.zip"
+          Write-Host "Downloading: $fileName"
+          Write-Host "From: $downloadUrl"
           
-          Write-Host "Extracting..."
-          Expand-Archive -Path "rustdesk-original.zip" -DestinationPath "rustdesk-base"
+          Invoke-WebRequest -Uri $downloadUrl -OutFile "rustdesk-download"
+          
+          Write-Host "Download completed"
+          
+          # Estrai i file
+          Write-Host "Extracting files..."
+          if ($fileName -like "*.zip") {
+            Expand-Archive -Path "rustdesk-download" -DestinationPath "rustdesk-base" -Force
+          } else {
+            # Prova con 7zip
+            & "C:\Program Files\7-Zip\7z.exe" x "rustdesk-download" -o"rustdesk-base" -y
+          }
           
           Write-Host "Files extracted:"
-          Get-ChildItem -Path "rustdesk-base" -Recurse
+          Get-ChildItem -Path "rustdesk-base" -Recurse | Select-Object -First 20
 
       - name: Rebrand executables
         shell: powershell
