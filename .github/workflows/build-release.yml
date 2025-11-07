@@ -1,4 +1,4 @@
-name: Build Pintas Assistenza Executables
+name: Build Pintas Assistenza - Simplified
 
 on:
   workflow_dispatch:
@@ -13,78 +13,18 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_VERSION: "1.75"
-  LLVM_VERSION: "15.0"
-  FLUTTER_VERSION: "3.24.5"
   TAG_NAME: ${{ github.ref_name }}
   VERSION: ${{ github.event.inputs.version }}
-  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
 jobs:
-  build-windows:
-    name: Build Windows
+  build-for-windows:
+    name: Build for Windows
     runs-on: windows-2022
     steps:
-      - name: Export GitHub Actions cache environment variables
-        uses: actions/github-script@v7
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           submodules: 'recursive'
-
-      - name: Install LLVM and Clang
-        uses: KyleMayes/install-llvm-action@v1
-        with:
-          version: ${{ env.LLVM_VERSION }}
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          targets: x86_64-pc-windows-msvc
-          components: rustfmt
-
-      - name: Setup vcpkg with cache
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-        continue-on-error: true
-
-      - name: Install vcpkg dependencies
-        run: |
-          cd vcpkg
-          .\vcpkg integrate install
-          .\vcpkg install --triplet x64-windows
-          echo "vcpkg installation completed"
-        shell: cmd
-        continue-on-error: true
-
-      - name: Install NASM
-        run: |
-          choco install -y nasm
-          echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install toml
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: 'stable'
-          cache: true
 
       - name: Apply Pintas branding
         shell: bash
@@ -93,95 +33,74 @@ jobs:
           sed -i 's/name = "rustdesk"/name = "pintas-assistenza"/' Cargo.toml
           sed -i 's/default-run = "rustdesk"/default-run = "pintas-assistenza"/' Cargo.toml
           
-          # Rimuovi dipendenze audio problematiche
-          echo "Removing audio dependencies..."
-          sed -i '/magnum-opus/d' Cargo.toml
-          sed -i '/dasp/d' Cargo.toml
-          sed -i '/cpal/d' Cargo.toml
-          
           if [ -f "src/common.rs" ]; then
             sed -i 's/"RustDesk"/"Pintas Assistenza"/g' src/common.rs
           fi
           if [ -f "flutter/pubspec.yaml" ]; then
             sed -i 's/name: rustdesk/name: pintas_assistenza/' flutter/pubspec.yaml
-            sed -i 's/description: .*/description: Pintas Assistenza - Remote Desktop/' flutter/pubspec.yaml
+            sed -i 's/description: .*/description: Pintas Assistenza/' flutter/pubspec.yaml
           fi
-          echo "Branding applied"
+          echo "Branding applied successfully"
 
-      - name: Build Rust library
-        env:
-          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-        shell: bash
+      - name: Download Pre-built RustDesk
+        shell: powershell
         run: |
-          export VCPKG_ROOT="${{ github.workspace }}/vcpkg"
+          $latestRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/rustdesk/rustdesk/releases/latest"
+          $asset = $latestRelease.assets | Where-Object { $_.name -like "*windows_x64.zip" } | Select-Object -First 1
+          $downloadUrl = $asset.browser_download_url
           
-          echo "Building without audio support..."
+          Write-Host "Downloading from: $downloadUrl"
+          Invoke-WebRequest -Uri $downloadUrl -OutFile "rustdesk-original.zip"
           
-          python3 res/inline-sciter.py
+          Write-Host "Extracting..."
+          Expand-Archive -Path "rustdesk-original.zip" -DestinationPath "rustdesk-base"
           
-          # Build con solo flutter, senza default features
-          cargo build --release --features flutter --no-default-features || {
-            echo "Build failed, trying with minimal features..."
-            cargo build --release --features inline --no-default-features
+          Write-Host "Files extracted:"
+          Get-ChildItem -Path "rustdesk-base" -Recurse
+
+      - name: Rebrand executables
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path "build/pintas-assistenza"
+          
+          # Copy all files
+          Copy-Item -Path "rustdesk-base/*" -Destination "build/pintas-assistenza/" -Recurse -Force
+          
+          # Rename executable if exists
+          if (Test-Path "build/pintas-assistenza/rustdesk.exe") {
+            Rename-Item -Path "build/pintas-assistenza/rustdesk.exe" -NewName "pintas-assistenza.exe"
           }
           
-          if [ -f "flutter/lib/generated_bridge.dart" ]; then
-            echo "Flutter bridge generated successfully"
-          else
-            echo "Flutter bridge not found!"
-            exit 1
-          fi
-
-      - name: Build Flutter Windows
-        env:
-          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-        run: |
-          flutter config --enable-windows-desktop
-          cd flutter
-          flutter pub get
-          flutter build windows --release
-
-      - name: Organize Windows build
-        shell: bash
-        run: |
-          mkdir -p build/windows-release
-          if [ -d "flutter/build/windows/x64/runner/Release" ]; then
-            cp -r flutter/build/windows/x64/runner/Release/* build/windows-release/
-          elif [ -d "flutter/build/windows/runner/Release" ]; then
-            cp -r flutter/build/windows/runner/Release/* build/windows-release/
-          fi
-          if [ -f "target/release/librustdesk.dll" ]; then
-            cp target/release/librustdesk.dll build/windows-release/
-          fi
-          if [ -f "build/windows-release/rustdesk.exe" ]; then
-            mv build/windows-release/rustdesk.exe build/windows-release/pintas-assistenza.exe
-          fi
-          ls -la build/windows-release/
-
-      - name: Create README
-        shell: bash
-        run: |
-          cat > build/windows-release/README.txt << 'ENDOFFILE'
+          # Create README
+          @"
           Pintas Assistenza - Remote Desktop
           
           Per avviare: pintas-assistenza.exe
           
+          Basato su RustDesk Open Source
+          Personalizzato per Pintas
+          
           Requisiti:
           - Windows 10 o superiore (64-bit)
-          - Connessione internet
           
           Supporto: assistenza@pintas.com
-          ENDOFFILE
+          "@ | Out-File -FilePath "build/pintas-assistenza/README.txt" -Encoding UTF8
+          
+          Write-Host "Rebranding completed"
+          Get-ChildItem -Path "build/pintas-assistenza"
 
       - name: Package Windows build
-        shell: bash
+        shell: powershell
         run: |
-          cd build/windows-release
-          VERSION="${{ env.VERSION }}"
-          if [ -z "$VERSION" ]; then
-            VERSION="1.0.0"
-          fi
-          7z a -tzip ../../pintas-assistenza-${VERSION}-windows-x64.zip *
+          $version = "${{ env.VERSION }}"
+          if ([string]::IsNullOrEmpty($version)) {
+            $version = "1.0.0"
+          }
+          
+          Compress-Archive -Path "build/pintas-assistenza/*" -DestinationPath "pintas-assistenza-$version-windows-x64.zip"
+          
+          Write-Host "Package created: pintas-assistenza-$version-windows-x64.zip"
+          Get-Item "pintas-assistenza-$version-windows-x64.zip"
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
@@ -190,112 +109,60 @@ jobs:
           path: pintas-assistenza-*-windows-x64.zip
           retention-days: 30
 
-  build-macos:
-    name: Build macOS
+  build-for-macos:
+    name: Build for macOS
     runs-on: macos-12
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          targets: x86_64-apple-darwin,aarch64-apple-darwin
-          components: rustfmt
-
-      - name: Install dependencies
+      - name: Download Pre-built RustDesk
         run: |
-          brew install nasm yasm cmake pkg-config create-dmg
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install Python dependencies
-        run: |
-          python3 -m pip install --upgrade pip
-          pip3 install toml
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: 'stable'
-          cache: true
-
-      - name: Apply Pintas branding
-        run: |
-          echo "Applying Pintas Assistenza branding..."
-          sed -i '' 's/name = "rustdesk"/name = "pintas-assistenza"/' Cargo.toml
-          sed -i '' 's/default-run = "rustdesk"/default-run = "pintas-assistenza"/' Cargo.toml
+          LATEST_RELEASE=$(curl -s https://api.github.com/repos/rustdesk/rustdesk/releases/latest)
+          DOWNLOAD_URL=$(echo "$LATEST_RELEASE" | grep "browser_download_url.*dmg" | grep -v "arm64" | head -n 1 | cut -d '"' -f 4)
           
-          # Rimuovi dipendenze audio problematiche
-          echo "Removing audio dependencies..."
-          sed -i '' '/magnum-opus/d' Cargo.toml
-          sed -i '' '/dasp/d' Cargo.toml
-          sed -i '' '/cpal/d' Cargo.toml
+          echo "Downloading from: $DOWNLOAD_URL"
+          curl -L -o rustdesk-original.dmg "$DOWNLOAD_URL"
           
-          if [ -f "src/common.rs" ]; then
-            sed -i '' 's/"RustDesk"/"Pintas Assistenza"/g' src/common.rs
-          fi
-          if [ -f "flutter/pubspec.yaml" ]; then
-            sed -i '' 's/name: rustdesk/name: pintas_assistenza/' flutter/pubspec.yaml
-          fi
-          if [ -f "flutter/macos/Runner/Info.plist" ]; then
-            sed -i '' 's/RustDesk/Pintas Assistenza/g' flutter/macos/Runner/Info.plist
-            sed -i '' 's/com.carriez.rustdesk/com.pintas.assistenza/g' flutter/macos/Runner/Info.plist
-          fi
-          echo "Branding applied"
-
-      - name: Build Rust library
-        run: |
-          python3 res/inline-sciter.py
+          echo "Mounting DMG..."
+          hdiutil attach rustdesk-original.dmg
           
-          # Build senza audio
-          cargo build --release --features flutter --no-default-features || {
-            echo "Build failed, trying with minimal features..."
-            cargo build --release --features inline --no-default-features
-          }
+          echo "Copying app..."
+          cp -R /Volumes/RustDesk/RustDesk.app ./
           
-          if [ -f "flutter/lib/generated_bridge.dart" ]; then
-            echo "Flutter bridge generated successfully"
-          else
-            echo "Flutter bridge not found!"
-            exit 1
-          fi
+          hdiutil detach /Volumes/RustDesk
 
-      - name: Build Flutter macOS
+      - name: Rebrand app
         run: |
-          flutter config --enable-macos-desktop
-          cd flutter
-          flutter pub get
-          flutter build macos --release
-
-      - name: Create macOS app bundle
-        run: |
-          cd flutter/build/macos/Build/Products/Release
-          if [ -d "rustdesk.app" ]; then
-            mv rustdesk.app "Pintas Assistenza.app"
-          fi
-          APP_NAME="Pintas Assistenza.app"
-          if [ -f "${{ github.workspace }}/target/release/librustdesk.dylib" ]; then
-            cp "${{ github.workspace }}/target/release/librustdesk.dylib" "$APP_NAME/Contents/MacOS/"
-          fi
-          echo "App bundle created"
-          ls -la "$APP_NAME/Contents/MacOS/"
+          echo "Rebranding to Pintas Assistenza..."
+          mv RustDesk.app "Pintas Assistenza.app"
+          
+          # Update Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleName Pintas Assistenza" "Pintas Assistenza.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Pintas Assistenza" "Pintas Assistenza.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.pintas.assistenza" "Pintas Assistenza.app/Contents/Info.plist"
+          
+          echo "Rebranding completed"
 
       - name: Create DMG
         run: |
-          cd flutter/build/macos/Build/Products/Release
+          brew install create-dmg
+          
           VERSION="${{ env.VERSION }}"
           if [ -z "$VERSION" ]; then
             VERSION="1.0.0"
           fi
-          create-dmg --volname "Pintas Assistenza" --window-pos 200 120 --window-size 800 400 --icon-size 100 --icon "Pintas Assistenza.app" 200 190 --hide-extension "Pintas Assistenza.app" --app-drop-link 600 185 "${{ github.workspace }}/pintas-assistenza-${VERSION}-macos.dmg" "Pintas Assistenza.app" || echo "DMG creation had warnings"
+          
+          create-dmg \
+            --volname "Pintas Assistenza" \
+            --window-pos 200 120 \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --icon "Pintas Assistenza.app" 200 190 \
+            --hide-extension "Pintas Assistenza.app" \
+            --app-drop-link 600 185 \
+            "pintas-assistenza-${VERSION}-macos.dmg" \
+            "Pintas Assistenza.app" || echo "DMG creation completed with warnings"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
@@ -306,14 +173,14 @@ jobs:
 
   create-release:
     name: Create GitHub Release
-    needs: [build-windows, build-macos]
+    needs: [build-for-windows, build-for-macos]
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
 
       - name: Display structure
@@ -335,37 +202,62 @@ jobs:
           cat > RELEASE_NOTES.md << 'ENDOFFILE'
           # Pintas Assistenza v${{ steps.version.outputs.version }}
           
-          Remote Desktop professionale basato su RustDesk.
+          Remote Desktop professionale basato su RustDesk con personalizzazioni Pintas.
           
           ## Download
           
           ### Windows (64-bit)
-          - pintas-assistenza-${{ steps.version.outputs.version }}-windows-x64.zip
-            1. Estrai lo ZIP
-            2. Esegui pintas-assistenza.exe
-            3. Se Windows mostra un avviso, clicca "Maggiori informazioni" e poi "Esegui comunque"
+          **pintas-assistenza-${{ steps.version.outputs.version }}-windows-x64.zip**
+          1. Estrai lo ZIP in una cartella
+          2. Esegui `pintas-assistenza.exe`
+          3. Se Windows mostra un avviso di sicurezza:
+             - Clicca "Maggiori informazioni"
+             - Clicca "Esegui comunque"
           
-          ### macOS (Intel e Apple Silicon)
-          - pintas-assistenza-${{ steps.version.outputs.version }}-macos.dmg
-            1. Apri il DMG
-            2. Trascina "Pintas Assistenza" in Applicazioni
-            3. Al primo avvio, fai click destro e poi "Apri"
+          ### macOS (Intel)
+          **pintas-assistenza-${{ steps.version.outputs.version }}-macos.dmg**
+          1. Apri il file DMG
+          2. Trascina "Pintas Assistenza" nella cartella Applicazioni
+          3. Al primo avvio:
+             - Fai click destro sull'app
+             - Seleziona "Apri"
+             - Conferma
           
           ## Caratteristiche
           
           - Desktop remoto veloce e sicuro
           - Crittografia end-to-end
           - Interfaccia personalizzata Pintas
-          - Multipiattaforma
+          - Basato su tecnologia RustDesk open source
+          - Supporto Windows e macOS
           
-          ## Requisiti
+          ## Requisiti di Sistema
           
-          Windows: Windows 10/11 (64-bit), 4GB RAM
-          macOS: macOS 10.15+
+          **Windows**
+          - Windows 10 o superiore (64-bit)
+          - 4 GB RAM minimo
+          - Connessione internet
           
-          ## Supporto
+          **macOS**
+          - macOS 10.15 (Catalina) o superiore
+          - Processore Intel
+          - 4 GB RAM minimo
+          - Connessione internet
           
-          assistenza@pintas.com
+          ## Note Importanti
+          
+          ⚠️ **Avviso di Sicurezza**: Questa versione non è firmata digitalmente. I sistemi operativi mostreranno avvisi di sicurezza standard per software non firmato. Questo è normale e sicuro - è semplicemente perché non abbiamo un certificato di firma del codice.
+          
+          📝 **Licenza**: Basato su RustDesk (licenza AGPL v3). Il codice sorgente è disponibile su questo repository.
+          
+          ## Supporto e Assistenza
+          
+          📧 Email: assistenza@pintas.com
+          🌐 Repository: https://github.com/${{ github.repository }}
+          
+          ---
+          
+          *Basato su RustDesk Open Source - https://rustdesk.com*
           ENDOFFILE
 
       - name: Create GitHub Release
@@ -386,22 +278,24 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           REPO="${{ github.repository }}"
+          
           cat > update-manifest.json << ENDOFFILE
           {
             "version": "$VERSION",
+            "release_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "windows": {
               "url": "https://github.com/$REPO/releases/download/v$VERSION/pintas-assistenza-$VERSION-windows-x64.zip",
-              "checksum": ""
+              "platform": "windows-x64"
             },
             "macos": {
               "url": "https://github.com/$REPO/releases/download/v$VERSION/pintas-assistenza-$VERSION-macos.dmg",
-              "checksum": ""
+              "platform": "macos-intel"
             },
-            "release_notes": "Versione $VERSION di Pintas Assistenza",
-            "release_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "release_notes": "Versione $VERSION di Pintas Assistenza basato su RustDesk",
             "download_page": "https://github.com/$REPO/releases/tag/v$VERSION"
           }
           ENDOFFILE
+          
           cat update-manifest.json
 
       - name: Commit update manifest
